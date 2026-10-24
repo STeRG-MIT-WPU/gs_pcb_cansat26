@@ -123,10 +123,12 @@ static void radio_in(const char *line, port_t *pc, GPIO_TypeDef *led_port, uint1
     if (k == GS_TLM) HAL_GPIO_TogglePin(led_port, led_pin);
 }
 
-/* PC -> radio: one telecommand per line, CRLF terminated like rf_pcb-fw expects. */
+/* PC -> radio: one telecommand per line, sent verbatim + CRLF on the radio of the port it
+ * arrived on (USB-A -> XBee, USB-B -> LoRa). rf_pcb-fw relays it to the FC unchanged, so the
+ * FC framing rules are enforced here (gs_tc_ok). No reply comes back; confirm via telemetry. */
 static void pc_in(const char *line, port_t *radio)
 {
-    if (!*line || strlen(line) > GS_TC_MAX - 2) return;
+    if (!gs_tc_ok(line)) return;
     port_write_line(radio, line);
 }
 /* USER CODE END 0 */

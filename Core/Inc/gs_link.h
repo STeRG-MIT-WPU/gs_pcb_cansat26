@@ -38,4 +38,9 @@ enum { GS_DROP = 0, GS_TLM, GS_IMG };
  * verbatim, the PC checks the *hh checksum). GS_DROP: partial/corrupt/anything else. */
 int gs_classify(const char *line);
 
+/* PC -> radio gate (TELECOMMAND_HANDOFF.md s.2, s.3, s.6, s.7): non-empty, <= GS_TC_MAX-2 chars,
+ * printable ASCII only, not starting with '$' (FC drops it), not a SIM line (flight safety).
+ * Returns 1 if the line may be sent to the FC as a telecommand. */
+int gs_tc_ok(const char *line);
+
 #endif

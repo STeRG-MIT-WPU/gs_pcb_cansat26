@@ -94,9 +94,21 @@ Anything else (partial LoRa frames after a lost packet, noise, echoes) is droppe
 telemetry arrives as a 240-byte chunk, a 500 ms gap, then the rest; the assembler simply waits
 for the `\n`. XBee carries telemetry at 5 Hz plus image lines; LoRa carries telemetry at 1 Hz.
 
-**PC to radio.** Each line received on USB-A goes out on the XBee, each line on USB-B goes out
-on the LoRa, CRLF terminated. rf_pcb-fw forwards it to the flight computer as a telecommand.
-Lines longer than 118 characters are dropped (rf_pcb-fw `TC_MAX`).
+**PC to radio (telecommands).** The two USB ports are listened to continuously. Each line
+received on USB-A is transmitted on the XBee, each line on USB-B on the LoRa, verbatim plus
+CRLF. rf_pcb-fw relays it unchanged to the flight computer, which parses it as a console
+command (`BUZZ ON`, `STATE 2`, `CAPTURE`, `IMGACK,<id>,OK`, ... see `TELECOMMAND_HANDOFF.md`
+in the FC repo). Because nothing downstream rewrites the line, the FC framing rules are
+enforced here (`gs_tc_ok` in `gs_link.c`) and a line that fails is silently dropped:
+
+- empty, or longer than 118 characters (rf_pcb-fw `TC_MAX` minus CRLF; FC limit is 127)
+- any byte outside printable ASCII 0x20..0x7E (the FC treats 0x08/0x7F as backspace)
+- first character `$` (the FC drops these; stops a looped-back telemetry line)
+- `SIM...` flight-simulator lines (bench only; remove the check in `gs_tc_ok` for bench use)
+
+Command words must be upper case; the firmware does not change case. The FC sends no reply
+on the radio link: confirm a command through the `STATE`, `EFLAG` and packet fields of the
+telemetry. Send one command per line and leave at least 20 ms between commands.
 
 Routing is the four lines in the main loop of `Core/Src/main.c`; swap `usb_a` / `usb_b` there
 to move a radio to the other USB port.

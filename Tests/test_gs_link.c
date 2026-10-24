@@ -56,6 +56,18 @@ int main(void)
     feed(&q, "$IMG,1,1,1,4,AAAA*00\n");
     l = gs_rx_line(&q); assert(l && gs_classify(l) == GS_IMG);
 
+    /* PC -> radio telecommand gate */
+    assert(gs_tc_ok("BUZZ ON"));
+    assert(gs_tc_ok("TIME 12 30 00"));
+    assert(gs_tc_ok("IMGACK,7,OK"));
+    assert(!gs_tc_ok(""));
+    assert(!gs_tc_ok(TLM));                                /* telemetry looped back: FC drops '$' lines */
+    assert(!gs_tc_ok("SIM,1,100,0,0"));
+    assert(!gs_tc_ok("SIM OFF"));
+    assert(!gs_tc_ok("BUZZ ON"));                      /* backspace is not printable */
+    { char big[GS_TC_MAX + 8]; memset(big, 'A', sizeof big - 1); big[sizeof big - 1] = 0;
+      assert(!gs_tc_ok(big)); big[GS_TC_MAX - 2] = 0; assert(gs_tc_ok(big)); }
+
     puts("gs_link ok");
     return 0;
 }

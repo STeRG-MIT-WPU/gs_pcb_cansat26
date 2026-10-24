@@ -26,3 +26,14 @@ int gs_classify(const char *line)
     if (line[0] == '$' && line[1] == ',' && tlm_parse(line, &t) == 0) return GS_TLM;
     return GS_DROP;
 }
+
+int gs_tc_ok(const char *line)
+{
+    size_t n = strlen(line);
+    if (!n || n > GS_TC_MAX - 2) return 0;
+    if (line[0] == '$') return 0;
+    if (strncmp(line, "SIM", 3) == 0) return 0;   /* ponytail: no bench flag; delete this line for simulator tests */
+    for (const char *c = line; *c; c++)
+        if (*c < 0x20 || *c > 0x7E) return 0;
+    return 1;
+}
