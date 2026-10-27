@@ -4,9 +4,9 @@ Firmware for the CanSat 2026 ground station board: STM32F446RET6 (LQFP64), STM32
 CubeMX project (`gs_pcb_v1.ioc`, FW_F4 V1.28.3), bare metal (no RTOS).
 
 The board is the receiving end of [rf_pcb-fw](https://github.com/STeRG-MIT-WPU/rf_pcb-fw). It
-listens on the XBee and the E22 LoRa and bridges each radio to its own USB-UART, so the PC sees
-one clean, validated stream per radio. Lines typed on a USB port go back out on that radio as
-telecommands, which the RF board relays to the flight computer.
+listens on the XBee and the E22 LoRa and bridges each radio to its own USB-UART, byte for byte,
+so the PC sees exactly what the radio delivered. Lines typed on a USB port go back out on that
+radio as telecommands, which the RF board relays to the flight computer.
 
 ```
  XBee S3 Pro  <-- USART1 115200 -->            <-- USART2 115200 -->  FT231 (A), USB1   LED0
@@ -47,8 +47,8 @@ Nets as named on the schematic MCU sheet.
 | PA3  | USBDB1_RX     | USART2_RX       | in        | FT231 (A) TXD                                      |
 | PC12 | USBDB2_TX     | UART5_TX        | out       | FT231 (B) RXD, USB2                                |
 | PD2  | USBDB2_RX     | UART5_RX        | in        | FT231 (B) TXD                                      |
-| PC2  | LED0          | GPIO output     | out       | D3, toggles per valid XBee telemetry packet        |
-| PC1  | LED1          | GPIO output     | out       | D4, toggles per valid LoRa telemetry packet        |
+| PC2  | LED0          | GPIO output     | out       | D3, toggles per line received from the XBee         |
+| PC1  | LED1          | GPIO output     | out       | D4, toggles per line received from the LoRa         |
 | PH0  | HSE_IN        | RCC_OSC_IN      |           | 16 MHz crystal                                     |
 | PH1  | HSE_OUT       | RCC_OSC_OUT     |           |                                                    |
 | PA13 | SWDIO         |                 |           | J1 ST-LINK header                                  |
@@ -76,23 +76,14 @@ configured for 115200 (same as the RF board); the firmware does not change modul
 
 ## Data flow
 
-Each UART receives one byte per interrupt into a 1 KB ring (`gs_rx_t`). The main loop
-assembles lines and handles one line per port per pass, round robin.
+Each UART receives one byte per interrupt into a 1 KB ring (`gs_rx_t`). The main loop drains
+the four rings round robin.
 
-**Radio to PC.** A line is forwarded verbatim, CRLF terminated, only if it is
-
-- a complete FC telemetry frame, checked with `tlm_parse` from rf_pcb-fw:
-
-  ```
-  $,TEAM_ID,TIME,PKT,ACC(x|y|z),GYR(x|y|z),MAG(x|y|z),EUL(r|p|y),ALT,PRES,TEMP,VEL(x|y|z),
-  GNSS_TIME,LAT,LON,GNSS_ALT,SATS,GNSS_VEL(x|y),CURRENT,VOLT,BATT%,STATE,EFLAG,PROP_DEPLOY,RW_STATUS,#
-  ```
-
-- or an image line (`$IMGSTART`, `$IMG`, `$IMGEND`); the `*hh` checksum is left to the PC.
-
-Anything else (partial LoRa frames after a lost packet, noise, echoes) is dropped. The LoRa
-telemetry arrives as a 240-byte chunk, a 500 ms gap, then the rest; the assembler simply waits
-for the `\n`. XBee carries telemetry at 5 Hz plus image lines; LoRa carries telemetry at 1 Hz.
+**Radio to PC.** Raw passthrough. Whatever the XBee delivers is written to USB-A, whatever the
+LoRa delivers is written to USB-B, unchanged and in order. Nothing is parsed, reframed or
+dropped, so a change of telemetry format on the FC never affects this board. LED0 / LED1 toggle
+once per `
+` received from the respective radio.
 
 **PC to radio (telecommands).** The two USB ports are listened to continuously. Each line
 received on USB-A is transmitted on the XBee, each line on USB-B on the LoRa, verbatim plus
@@ -116,8 +107,7 @@ to move a radio to the other USB port.
 ## Project layout
 
 ```
-Core/Inc/gs_link.h, Core/Src/gs_link.c      byte ring, line assembler, line classifier (HAL-free)
-Core/Inc/telemetry.h, Core/Src/telemetry.c  FC frame parser, copied verbatim from rf_pcb-fw
+Core/Inc/gs_link.h, Core/Src/gs_link.c      byte ring, line assembler, telecommand gate (HAL-free)
 Core/Src/main.c                             clock, UART/GPIO init, bridge loop, UART callbacks
 Core/Src/stm32f4xx_hal_msp.c                UART pin muxing and NVIC
 Core/Src/stm32f4xx_it.c                     UART interrupt handlers
@@ -129,15 +119,14 @@ gs_pcb_v1.ioc                               CubeMX configuration
 
 Open the folder in STM32CubeIDE (File > Open Projects from File System), build, and flash over
 the J1 SWD header with an ST-LINK. Regenerating code from the `.ioc` is safe: application code
-lives in `USER CODE` blocks and in `gs_link.c` / `telemetry.c`.
+lives in `USER CODE` blocks and in `gs_link.c`.
 
 On the PC, open USB1 (XBee) and/or USB2 (LoRa) at 115200 8N1 with any serial terminal or the
-ground station software. Each line is one telemetry frame or image line.
+ground station software. The stream is exactly what the radio received.
 
 Host self-checks (not part of the firmware build, need any host `gcc`):
 
 ```
 cd Tests
-gcc -I../Core/Inc test_telemetry.c ../Core/Src/telemetry.c -o t && ./t
-gcc -I../Core/Inc test_gs_link.c ../Core/Src/gs_link.c ../Core/Src/telemetry.c -o t && ./t
+gcc -I../Core/Inc test_gs_link.c ../Core/Src/gs_link.c -o t && ./t
 ```

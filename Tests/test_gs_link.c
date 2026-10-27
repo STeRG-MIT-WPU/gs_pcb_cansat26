@@ -1,5 +1,5 @@
-/* Host self-check for the ground station line assembler and classifier.
- *   gcc -I../Core/Inc test_gs_link.c ../Core/Src/gs_link.c ../Core/Src/telemetry.c -o t && ./t
+/* Host self-check for the ground station line assembler and telecommand gate.
+ *   gcc -I../Core/Inc test_gs_link.c ../Core/Src/gs_link.c -o t && ./t
  * Not part of the STM32 build (only Core/ and Drivers/ are source folders). */
 #include "gs_link.h"
 #include <assert.h>
@@ -17,44 +17,34 @@ int main(void)
     static gs_rx_t q;
     const char *l;
 
-    /* LoRa delivers the frame as a chunk, a pause, then the rest: no line until the '\n' */
-    char frame[GS_LINE_MAX], first[GS_LINE_MAX];
-    snprintf(frame, sizeof frame, "%s\r\n", TLM);
-    size_t cut = strlen(TLM) / 2;
-    memcpy(first, frame, cut); first[cut] = 0;
-    feed(&q, first);
+    /* a line split across two pushes: nothing until the '\n', then the whole line, CR/LF stripped */
+    feed(&q, "BUZZ");
     assert(gs_rx_line(&q) == NULL);
-    feed(&q, frame + cut);
+    feed(&q, " ON\r\n");
     l = gs_rx_line(&q);
-    assert(l && strcmp(l, TLM) == 0);                 /* CR/LF stripped */
-    assert(gs_classify(l) == GS_TLM);
+    assert(l && strcmp(l, "BUZZ ON") == 0);
     assert(gs_rx_line(&q) == NULL);
 
     /* several lines queued: each comes out once, in order */
-    feed(&q, "$IMG,3,1,10,180,AAAA*5F\r\n$,garbage\n\n$IMGEND,3,10,69000*1C\n");
-    l = gs_rx_line(&q); assert(l && gs_classify(l) == GS_IMG);
-    l = gs_rx_line(&q); assert(l && gs_classify(l) == GS_DROP);    /* truncated telemetry */
+    feed(&q, "STATE 2\r\n\n CAPTURE\n");
+    l = gs_rx_line(&q); assert(l && strcmp(l, "STATE 2") == 0);
     l = gs_rx_line(&q); assert(l && *l == 0);                      /* empty line */
-    l = gs_rx_line(&q); assert(l && gs_classify(l) == GS_IMG && strncmp(l, "$IMGEND", 7) == 0);
+    l = gs_rx_line(&q); assert(l && strcmp(l, " CAPTURE") == 0);
     assert(gs_rx_line(&q) == NULL);
-
-    /* a telecommand echo or noise is dropped */
-    assert(gs_classify("CMD,011,CX,ON") == GS_DROP);
-    assert(gs_classify("") == GS_DROP);
 
     /* over-long garbage restarts the assembler; the next real line still comes out whole */
     for (int i = 0; i < GS_LINE_MAX + 50; i++) gs_rx_push(&q, 'x');
-    feed(&q, "\n$IMGSTART,4,69000,384*2A\n");
-    l = gs_rx_line(&q); assert(l && strlen(l) < GS_LINE_MAX && gs_classify(l) == GS_DROP);
-    l = gs_rx_line(&q); assert(l && gs_classify(l) == GS_IMG);
+    feed(&q, "\nIMG\n");
+    l = gs_rx_line(&q); assert(l && strlen(l) < GS_LINE_MAX);
+    l = gs_rx_line(&q); assert(l && strcmp(l, "IMG") == 0);
 
     /* ring full: bytes are dropped, nothing corrupts, reader recovers */
     for (int i = 0; i < 3 * GS_RING; i++) gs_rx_push(&q, 'y');
     while (gs_rx_line(&q)) ;
     feed(&q, "\n");
     while (gs_rx_line(&q)) ;
-    feed(&q, "$IMG,1,1,1,4,AAAA*00\n");
-    l = gs_rx_line(&q); assert(l && gs_classify(l) == GS_IMG);
+    feed(&q, "CALIB\n");
+    l = gs_rx_line(&q); assert(l && strcmp(l, "CALIB") == 0);
 
     /* PC -> radio telecommand gate */
     assert(gs_tc_ok("BUZZ ON"));
@@ -64,7 +54,7 @@ int main(void)
     assert(!gs_tc_ok(TLM));                                /* telemetry looped back: FC drops '$' lines */
     assert(!gs_tc_ok("SIM,1,100,0,0"));
     assert(!gs_tc_ok("SIM OFF"));
-    assert(!gs_tc_ok("BUZZ ON"));                      /* backspace is not printable */
+    assert(!gs_tc_ok("BUZZ\x08 ON"));                      /* backspace is not printable */
     { char big[GS_TC_MAX + 8]; memset(big, 'A', sizeof big - 1); big[sizeof big - 1] = 0;
       assert(!gs_tc_ok(big)); big[GS_TC_MAX - 2] = 0; assert(gs_tc_ok(big)); }
 

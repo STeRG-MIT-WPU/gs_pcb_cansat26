@@ -52,9 +52,9 @@ UART_HandleTypeDef huart5;
 
 /* USER CODE BEGIN PV */
 /* Ground station data flow (see README "Pin assignment"):
- *   XBee  (USART1, PA9/PA10)  <->  USB-UART A (USART2, PA2/PA3)   LED0 toggles per telemetry packet
- *   LoRa  (USART3, PB10/PC5)  <->  USB-UART B (UART5,  PC12/PD2)  LED1 toggles per telemetry packet
- * Radio -> PC: valid telemetry frames and $IMG lines, verbatim, one per line.
+ *   XBee  (USART1, PA9/PA10)  <->  USB-UART A (USART2, PA2/PA3)   LED0 toggles per received line
+ *   LoRa  (USART3, PB10/PC5)  <->  USB-UART B (UART5,  PC12/PD2)  LED1 toggles per received line
+ * Radio -> PC: raw bytes, dumped as received, nothing parsed or dropped.
  * PC -> radio: each line is sent as a telecommand (rf_pcb-fw relays it to the FC). */
 static port_t xbee  = { .h = &huart1 };
 static port_t lora  = { .h = &huart3 };
@@ -113,14 +113,18 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *h)
     port_arm(p);
 }
 
-/* Radio -> PC. Drops anything that is neither a complete telemetry frame nor an image line
- * (LoRa transparent mode delivers partial frames when a packet is lost). */
-static void radio_in(const char *line, port_t *pc, GPIO_TypeDef *led_port, uint16_t led_pin)
+/* Radio -> PC: every byte the radio delivers goes straight to the USB-UART, no framing,
+ * no parsing, no filtering. Sends the contiguous span of the ring up to the wrap point.
+ * The LED toggles once per '\n' seen in the span. */
+static void radio_dump(port_t *radio, port_t *pc, GPIO_TypeDef *led_port, uint16_t led_pin)
 {
-    int k = gs_classify(line);
-    if (k == GS_DROP) return;             /* ponytail: no drop counters; add if link stats are wanted on the PC */
-    port_write_line(pc, line);
-    if (k == GS_TLM) HAL_GPIO_TogglePin(led_port, led_pin);
+    gs_rx_t *q = &radio->rx;
+    uint16_t w = q->w, r = q->r;
+    if (r == w) return;
+    uint16_t n = (w > r) ? (uint16_t)(w - r) : (uint16_t)(GS_RING - r);
+    HAL_UART_Transmit(pc->h, &q->buf[r], n, TX_TIMEOUT_MS);   /* ponytail: blocking, <=1 KB = ~90 ms at 115200 */
+    if (memchr(&q->buf[r], '\n', n)) HAL_GPIO_TogglePin(led_port, led_pin);
+    q->r = (uint16_t)((r + n) % GS_RING);
 }
 
 /* PC -> radio: one telecommand per line, sent verbatim + CRLF on the radio of the port it
@@ -176,10 +180,10 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    /* One line per port per pass: round robin, so a chatty port cannot starve the others. */
+    /* Round robin: one ring span per radio, one line per USB port, so no port starves the others. */
     const char *l;
-    if ((l = gs_rx_line(&xbee.rx)))  radio_in(l, &usb_a, LED0_GPIO_Port, LED0_Pin);
-    if ((l = gs_rx_line(&lora.rx)))  radio_in(l, &usb_b, LED1_GPIO_Port, LED1_Pin);
+    radio_dump(&xbee, &usb_a, LED0_GPIO_Port, LED0_Pin);
+    radio_dump(&lora, &usb_b, LED1_GPIO_Port, LED1_Pin);
     if ((l = gs_rx_line(&usb_a.rx))) pc_in(l, &xbee);
     if ((l = gs_rx_line(&usb_b.rx))) pc_in(l, &lora);
     /* USER CODE END WHILE */

@@ -1,5 +1,4 @@
 #include "gs_link.h"
-#include "telemetry.h"
 #include <string.h>
 
 const char *gs_rx_line(gs_rx_t *q)
@@ -14,17 +13,9 @@ const char *gs_rx_line(gs_rx_t *q)
         }
         if (c == '\r') continue;
         if (q->ll < GS_LINE_MAX - 1) q->line[q->ll++] = c;
-        else q->ll = 0;                       /* longer than any frame: garbage, start over */
+        else q->ll = 0;                       /* longer than any command: garbage, start over */
     }
     return NULL;
-}
-
-int gs_classify(const char *line)
-{
-    FC_tlm t;
-    if (strncmp(line, "$IMG", 4) == 0) return GS_IMG;
-    if (line[0] == '$' && line[1] == ',' && tlm_parse(line, &t) == 0) return GS_TLM;
-    return GS_DROP;
 }
 
 int gs_tc_ok(const char *line)
