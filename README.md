@@ -85,7 +85,7 @@ assembles lines and handles one line per port per pass, round robin.
 
   ```
   $,TEAM_ID,TIME,PKT,ACC(x|y|z),GYR(x|y|z),MAG(x|y|z),EUL(r|p|y),ALT,PRES,TEMP,VEL(x|y|z),
-  GNSS_TIME,LAT,LON,GNSS_ALT,SATS,GNSS_VEL(x|y),CURRENT,VOLT,BATT%,STATE,EFLAG,#
+  GNSS_TIME,LAT,LON,GNSS_ALT,SATS,GNSS_VEL(x|y),CURRENT,VOLT,BATT%,STATE,EFLAG,PROP_DEPLOY,RW_STATUS,#
   ```
 
 - or an image line (`$IMGSTART`, `$IMG`, `$IMGEND`); the `*hh` checksum is left to the PC.
